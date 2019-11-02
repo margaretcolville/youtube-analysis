@@ -1,0 +1,194 @@
+---
+title: "DVN Analysis - YouTube trending videos' view counts"
+#author: "Margaret Colville"
+#date: "16 March 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+source('youtube.r')
+fullrun <- TRUE
+
+```
+
+# YouTube's trending videos' view counts
+For the first DVN analysis, I thought I would have a play with [this](https://www.kaggle.com/datasnaek/youtube-new/data) dataset, available from Kaggle, which contains scraped information about the trending YouTube videos in a number of countries starting from mid-November 2017 and ending mid-June 2018.  I decided to focus just on the United States, Canada, and Great Britain's data for simplicity.  A large part of the desire to look at this stemmed from the fact that I find YouTube's attempts to recommend videos to me pretty awful generally, so I wanted to see what *other* people found interesting.
+
+Before we begin, it's helpful to take a quick look at the rough shape of the data.
+```{r glimpse-table, echo=FALSE}
+glimpse(t)
+```
+
+The data includes a row each day the video trended, showing the video's title, the date the video trended, the cumulative view count, and so on.  If a video trended in multiple countries, there will be a row for each country.  I also appended the name of the category the video was tagged under; this information was stored in JSON files that were included in the extract.
+
+First, let's find the videos with the highest view count for each country:
+
+```{r high-view-counts-substitute, echo=FALSE, eval=!fullrun} 
+print("Table goes here")
+```
+
+```{r high-view-counts-table, echo=FALSE, eval=fullrun} 
+
+t %>%
+  group_by(country, title, category_name) %>%
+  summarise(start = min(trending_date),
+            end = max(trending_date),
+            days = end - start + 1,
+            views = max(views)) %>%
+  ungroup() %>%
+  group_by(country) %>%
+  top_n(5, wt = views) %>%
+  ungroup() %>%
+  rename(category = category_name) %>%
+  arrange(country, -views) %>%
+  htmlTable::htmlTable(rnames = FALSE)
+
+```
+
+
+As would make sense, the videos with the highest number of views are generally either music clips or 'entertainment' (often movie trailers).  People generally don't watch hour-long video essays over and over, but will quite happily loop music in the background.
+
+Next, let's shuffle things around a bit and find the videos with the longest days on the 'trending' list for each country:
+```{r long-trend-substitute, echo=FALSE, eval=!fullrun} 
+print("Table goes here")
+```
+
+```{r long-trend-table, echo=FALSE, eval=fullrun} 
+
+t %>%
+  group_by(country, title, category_name) %>%
+  summarise(start = min(trending_date),
+            end = max(trending_date),
+            days = end - start + 1,
+            views = max(views)) %>%
+  ungroup() %>%
+  group_by(country) %>%
+  top_n(5, wt = row_number(days)) %>%
+  ungroup() %>%
+  rename(category = category_name) %>%
+  arrange(country, -days) %>%
+  htmlTable::htmlTable(rnames = FALSE)
+
+```
+
+It's interesting that this seems to be a completely different list; sure, it's still music and movie trailers in large part, but it looks like the videos with sustained interest tend to get lower view counts overall.  It's also worth noting that in a number of cases, the 'category' here feels a bit off; "Popular Violin Covers" is tagged as "People and Blogs", but could just as easily (possibly more appropriately?) have been placed under "Music".
+
+Okay, so next we'll look at the trends.  Here are the cumulative views charted each day for the videos ending with more than `5 * 10 ^ 7` views:
+```{r high-volume-trend-chart, echo=FALSE, error=FALSE, warning=FALSE, message=FALSE}
+
+  t %>%
+    # anti_join(
+    #   t %>%
+    #     arrange(country, video_id, trending_date) %>%
+    #     group_by(country, video_id) %>%
+    #     mutate(lag_views = lag(views)) %>%
+    #     ungroup() %>%
+    #     filter(lag_views > views) %>%
+    #     select(video_id) %>%
+    #     unique()
+    # ) %>%
+    inner_join(
+      t %>%
+        filter(views > (5 * 10^7)) %>%
+        group_by(video_id) %>%
+        summarise(days = n()) %>%
+        ungroup() %>%
+        arrange(-days)
+    ) %>%
+    ggplot(aes(x = trending_date, y = views, col = title, label = channel_title, text = category_name)) +
+    geom_point(alpha = 0.1) +
+    geom_line() +
+    ylim(c(0,NA)) +
+    theme_bw() +
+    facet_grid(country~.) +
+    theme(legend.position='none') + 
+    labs(title = "Cumulative views each day for YouTube trending videos",
+         subtitle = "Limited to videos with at least 5 * 10^7 views over time") + 
+    NULL
+```
+Colour here indicates the video - so if there are lines (at roughly the same time) with the same colour, they're the same video.
+
+The first thing I noticed here is that Canada has much lower volumes in general than the other two.  Particularly Great Britain, but also the more recent trending data from the middle of April for the United States.  The other thing that comes across is that there seems to be some missing data between the end of March and the middle of April.  At a guess the scraper that was being used failed?  Another thing to note is that one particular trend line in the data for Great Britain appears to go down, not up, which seems like an error.  Maybe the video was deleted and then reuploaded?
+
+Let's rerun that static chart as an interactive plot.ly chart so we can play with it.
+
+```{r high-volume-trend-plotly, echo=FALSE, error=FALSE, warning=FALSE, message=FALSE, eval=fullrun}
+
+ggplotly(
+    t %>%
+    # anti_join(
+    #   t %>%
+    #     arrange(country, video_id, trending_date) %>%
+    #     group_by(country, video_id) %>%
+    #     mutate(lag_views = lag(views)) %>%
+    #     ungroup() %>%
+    #     filter(lag_views > views) %>%
+    #     select(video_id) %>%
+    #     unique()
+    # ) %>%
+    inner_join(
+      t %>%
+        filter(views > (5 * 10^7)) %>%
+        group_by(video_id) %>%
+        summarise(days = n()) %>%
+        ungroup() %>%
+        arrange(-days)
+    ) %>%
+    ggplot(aes(x = trending_date, y = views, col = title, label = channel_title, text = category_name)) +
+    geom_point(alpha = 0.1) +
+    geom_line() +
+    ylim(c(0,NA)) +
+    theme_bw() +
+    facet_grid(country~.) +
+    theme(legend.position='none') + 
+    labs(title = "Cumulative views each day for YouTube trending videos",
+         subtitle = "Limited to videos with at least 5 * 10^7 views over time") + 
+    NULL
+
+)
+
+```
+
+The interactive plot lets you mouse over individual points in the chart and identify them.  It becomes clear that in many cases the same videos are trending in all three countries, but with different levels of enthusiasm.  Ed Sheeran's song "Perfect" trended everywhere, but it was on the top list for Canada for a mere two days, while Great Britain watched it for two weeks.  On the other hand, many of the videos that were extremely popular in Britain (such as "Nicky Jam x J. Balvin - X (EQUIS)") seem to have been barely a footnote in the other two countries.  It also lets us discover that the weird "and now its volume has dropped again" video was titled 'Cobra Kai Ep 2 - Strike First - The Karate Kid Saga Continues'.  Maybe it was taken down for copyright infringement!
+
+As a final thing, I wanted to run the charts again but removing all of the videos tagged with "Music" or "Entertainment", to see the other types of videos that trend.  Here's that chart; the colouring here is the YouTube category applied to the video.  Since there's significantly fewer of them, I'll drop the minimum view count filter to just `10^7` for this one.
+
+```{r no-musicentertainment-plotly, echo=FALSE, error=FALSE, warning=FALSE, message=FALSE, eval=fullrun}
+
+ggplotly(
+    t %>%
+    # anti_join(
+    #   t %>%
+    #     arrange(country, video_id, trending_date) %>%
+    #     group_by(country, video_id) %>%
+    #     mutate(lag_views = lag(views)) %>%
+    #     ungroup() %>%
+    #     filter(lag_views > views) %>%
+    #     select(video_id) %>%
+    #     unique()
+    # ) %>%
+    inner_join(
+      t %>%
+        filter(views > (10^7)) %>%
+        group_by(video_id) %>%
+        summarise(days = n()) %>%
+        ungroup() %>%
+        arrange(-days)
+    ) %>%
+    filter(!category_name %in% c("Music", "Entertainment")) %>%
+    ggplot(aes(x = trending_date, y = views, text = title, label = channel_title, col = category_name)) +
+    geom_point(alpha = 0.1) +
+    geom_line() +
+    ylim(c(0,NA)) +
+    theme_bw() +
+    facet_grid(country~.) +
+    theme(legend.position='none') + 
+    labs(title = "Cumulative views each day for YouTube trending videos not tagged 'music' or 'entertainment'") + 
+    NULL
+)
+
+```
+
+Hey, look!  It's some different videos!  How novel!  Which lets us discover that many of the remaining items are also either music videos or movie trailers.  Sigh.  It also highlights that that possibly interesting-sounding video titled "To Our Daughter" is posted by Kylie Jenner and can probably be safely skipped.  I guess we've discovered why these videos aren't to my taste, haven't we?
